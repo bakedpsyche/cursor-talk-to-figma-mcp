@@ -259,6 +259,7 @@
         <div class="header-text">
           <h1>Talk To Figma MCP Plugin</h1>
           <p>Connect Figma to Cursor AI using MCP</p>
+          <p id="plugin-version">Build: unknown (old build, no version)</p>
         </div>
       </div>
 
@@ -528,8 +529,9 @@
           state.socket = new WebSocket(wsUrl);
 
           state.socket.onopen = () => {
-            // Generate random channel name
-            const channelName = generateChannelName();
+            // Fixed channel (fork): the relay is localhost-only, so a fixed
+            // name can't collide with anyone else. Every open plugin joins it.
+            const channelName = FIXED_CHANNEL;
             console.log("Joining channel:", channelName);
             state.channel = channelName;
 
@@ -762,6 +764,8 @@
       }
 
       // Add this function after the generateId() function
+      const FIXED_CHANNEL = "prem";
+
       function generateChannelName() {
         const characters = "abcdefghijklmnopqrstuvwxyz0123456789";
         let result = "";
@@ -869,6 +873,9 @@
       }
 
       // Listen for messages from the plugin code
+      // Ask the plugin code for its build version once the UI is listening
+      parent.postMessage({ pluginMessage: { type: "get-version" } }, "*");
+
       window.onmessage = (event) => {
         const message = event.data.pluginMessage;
         if (!message) return;
@@ -878,6 +885,10 @@
         switch (message.type) {
           case "connection-status":
             updateConnectionStatus(message.connected, message.message);
+            break;
+          case "plugin-version":
+            document.getElementById("plugin-version").textContent =
+              "Build: " + message.version;
             break;
           case "auto-connect":
             connectButton.click();

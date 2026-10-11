@@ -54,8 +54,12 @@ async function sendProgressUpdate(
   return update;
 }
 
+// Fork build version: bump on every change to this plugin (shown in the UI header)
+const PLUGIN_VERSION = "0.3.5-prem.3";
+
 // Show UI
 figma.showUI(__html__, { width: 350, height: 600 });
+figma.ui.postMessage({ type: "plugin-version", version: PLUGIN_VERSION });
 
 // Initialize anonymous analytics client_id (persisted via clientStorage)
 (async () => {
@@ -86,6 +90,9 @@ figma.ui.onmessage = async (msg) => {
       break;
     case "close-plugin":
       figma.closePlugin();
+      break;
+    case "get-version":
+      figma.ui.postMessage({ type: "plugin-version", version: PLUGIN_VERSION });
       break;
     case "execute-command":
       // Execute commands received from UI (which gets them from WebSocket)
@@ -262,6 +269,24 @@ async function handleCommand(command, params) {
       return await createSection(params);
     case "set_parent":
       return await setParent(params);
+    case "get_plugin_version":
+      return { version: PLUGIN_VERSION };
+    case "get_variables":
+      return await getVariables(params);
+    case "create_variable":
+      return await createVariable(params);
+    case "set_variable_value":
+      return await setVariableValue(params);
+    case "set_variable_scopes":
+      return await setVariableScopes(params);
+    case "delete_variable":
+      return await deleteVariable(params);
+    case "bind_variable":
+      return await bindVariable(params);
+    case "get_bound_variables":
+      return await getBoundVariables(params);
+    case "delete_style":
+      return await deleteStyle(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -4342,4 +4367,263 @@ async function setSelections(params) {
     notFoundIds: notFoundIds,
     message: `Selected ${nodes.length} nodes${notFoundIds.length > 0 ? ` (${notFoundIds.length} not found)` : ''}`
   };
+}
+
+// ---------------------------------------------------------------------------
+// Variables, bindings and style deletion (local additions)
+// ---------------------------------------------------------------------------
+
+function hexToRgba(hex) {
+  var h = String(hex).replace(/^#/, "");
+  if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+  if (h.length !== 6 && h.length !== 8) {
+    throw new Error(`Invalid hex colour: ${hex}`);
+  }
+  return {
+    r: parseInt(h.slice(0, 2), 16) / 255,
+    g: parseInt(h.slice(2, 4), 16) / 255,
+    b: parseInt(h.slice(4, 6), 16) / 255,
+    a: h.length === 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1,
+  };
+}
+
+async function findCollection(collection) {
+  if (!collection) throw new Error("Missing collection parameter");
+  var collections = await figma.variables.getLocalVariableCollectionsAsync();
+  var found = collections.find(
+    (c) => c.id === collection || c.name === collection
+  );
+  if (!found) throw new Error(`Variable collection not found: ${collection}`);
+  return found;
+}
+
+// Accepts a variable id, or a name (optionally narrowed by collection name/id)
+async function findVariable(variable, collection) {
+  if (!variable) throw new Error("Missing variable parameter");
+  if (String(variable).startsWith("VariableID:")) {
+    var byId = await figma.variables.getVariableByIdAsync(variable);
+    if (byId) return byId;
+  }
+  var all = await figma.variables.getLocalVariablesAsync();
+  var collectionId = null;
+  if (collection) collectionId = (await findCollection(collection)).id;
+  var matches = all.filter(
+    (v) =>
+      v.name === variable &&
+      (collectionId === null || v.variableCollectionId === collectionId)
+  );
+  if (matches.length === 0) throw new Error(`Variable not found: ${variable}`);
+  if (matches.length > 1) {
+    throw new Error(
+      `Variable name "${variable}" exists in ${matches.length} collections; pass collection`
+    );
+  }
+  return matches[0];
+}
+
+async function describeValue(value) {
+  if (value && value.type === "VARIABLE_ALIAS") {
+    var target = await figma.variables.getVariableByIdAsync(value.id);
+    return { alias: target ? target.name : value.id };
+  }
+  if (value && typeof value === "object" && "r" in value) {
+    return rgbaToHex(value);
+  }
+  return value;
+}
+
+async function toVariableValue(value, resolvedType) {
+  // { alias: "<variable name or id>", collection?: "<name>" } makes an alias
+  if (value && typeof value === "object" && value.alias) {
+    var target = await findVariable(value.alias, value.collection);
+    return figma.variables.createVariableAlias(target);
+  }
+  if (resolvedType === "COLOR") return hexToRgba(value);
+  if (resolvedType === "FLOAT") return Number(value);
+  if (resolvedType === "BOOLEAN") return Boolean(value);
+  return String(value);
+}
+
+async function getVariables(params) {
+  var { collection } = params || {};
+  var collections = await figma.variables.getLocalVariableCollectionsAsync();
+  if (collection) {
+    collections = collections.filter(
+      (c) => c.id === collection || c.name === collection
+    );
+  }
+  var result = [];
+  for (var c of collections) {
+    var variables = [];
+    for (var id of c.variableIds) {
+      var v = await figma.variables.getVariableByIdAsync(id);
+      if (!v) continue;
+      var values = {};
+      for (var mode of c.modes) {
+        values[mode.name] = await describeValue(v.valuesByMode[mode.modeId]);
+      }
+      variables.push({
+        id: v.id,
+        name: v.name,
+        type: v.resolvedType,
+        scopes: v.scopes,
+        values: values,
+      });
+    }
+    result.push({
+      id: c.id,
+      name: c.name,
+      modes: c.modes.map((m) => m.name),
+      variables: variables,
+    });
+  }
+  return result;
+}
+
+async function createVariable(params) {
+  var { collection, name, type = "COLOR", value, scopes } = params || {};
+  if (!name) throw new Error("Missing name parameter");
+  var target = await findCollection(collection);
+  var all = await figma.variables.getLocalVariablesAsync();
+  if (all.some((v) => v.name === name && v.variableCollectionId === target.id)) {
+    throw new Error(`Variable "${name}" already exists in ${target.name}`);
+  }
+  var variable = figma.variables.createVariable(name, target, type);
+  if (value !== undefined) {
+    var converted = await toVariableValue(value, type);
+    for (var mode of target.modes) {
+      variable.setValueForMode(mode.modeId, converted);
+    }
+  }
+  if (Array.isArray(scopes)) variable.scopes = scopes;
+  return {
+    id: variable.id,
+    name: variable.name,
+    collection: target.name,
+    type: variable.resolvedType,
+    scopes: variable.scopes,
+  };
+}
+
+async function setVariableValue(params) {
+  var { variable, collection, value, mode } = params || {};
+  if (value === undefined) throw new Error("Missing value parameter");
+  var v = await findVariable(variable, collection);
+  var c = await figma.variables.getVariableCollectionByIdAsync(
+    v.variableCollectionId
+  );
+  var modes = mode
+    ? c.modes.filter((m) => m.name === mode || m.modeId === mode)
+    : c.modes;
+  if (modes.length === 0) throw new Error(`Mode not found: ${mode}`);
+  var converted = await toVariableValue(value, v.resolvedType);
+  for (var m of modes) v.setValueForMode(m.modeId, converted);
+  return {
+    id: v.id,
+    name: v.name,
+    modes: modes.map((m) => m.name),
+    value: await describeValue(converted),
+  };
+}
+
+async function setVariableScopes(params) {
+  var { variable, collection, scopes } = params || {};
+  if (!Array.isArray(scopes)) throw new Error("scopes must be an array");
+  var v = await findVariable(variable, collection);
+  v.scopes = scopes;
+  return { id: v.id, name: v.name, scopes: v.scopes };
+}
+
+async function deleteVariable(params) {
+  var { variable, collection } = params || {};
+  var v = await findVariable(variable, collection);
+  var info = { id: v.id, name: v.name };
+  v.remove();
+  return Object.assign(info, { deleted: true });
+}
+
+async function bindVariable(params) {
+  var { nodeId, variable, collection, field = "fills", index = 0 } = params || {};
+  if (!nodeId) throw new Error("Missing nodeId parameter");
+  if (field !== "fills" && field !== "strokes") {
+    throw new Error('field must be "fills" or "strokes"');
+  }
+  var node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) throw new Error(`Node not found with ID: ${nodeId}`);
+  if (!(field in node) || node[field] === figma.mixed) {
+    throw new Error(`Node has no ${field} that can be bound`);
+  }
+  var v = await findVariable(variable, collection);
+  var paints = node[field].slice();
+  if (!paints[index] || paints[index].type !== "SOLID") {
+    throw new Error(`No solid paint at ${field}[${index}]`);
+  }
+  paints[index] = figma.variables.setBoundVariableForPaint(
+    paints[index],
+    "color",
+    v
+  );
+  node[field] = paints;
+  return { nodeId: node.id, name: node.name, field: field, index: index, variable: v.name };
+}
+
+async function getBoundVariables(params) {
+  var { nodeId } = params || {};
+  if (!nodeId) throw new Error("Missing nodeId parameter");
+  var node = await figma.getNodeByIdAsync(nodeId);
+  if (!node) throw new Error(`Node not found with ID: ${nodeId}`);
+  var result = { nodeId: node.id, name: node.name, fills: [], strokes: [], other: {} };
+  for (var field of ["fills", "strokes"]) {
+    if (!(field in node) || node[field] === figma.mixed) continue;
+    for (var paint of node[field]) {
+      var alias = paint.boundVariables && paint.boundVariables.color;
+      var entry = { type: paint.type };
+      if (paint.type === "SOLID") entry.color = rgbaToHex(paint.color);
+      if (alias) {
+        var bound = await figma.variables.getVariableByIdAsync(alias.id);
+        entry.variable = bound ? bound.name : alias.id;
+      }
+      result[field].push(entry);
+    }
+  }
+  var nodeBound = node.boundVariables || {};
+  for (var key of Object.keys(nodeBound)) {
+    if (key === "fills" || key === "strokes") continue;
+    var names = [];
+    for (var ref of [].concat(nodeBound[key])) {
+      var rv = ref && (await figma.variables.getVariableByIdAsync(ref.id));
+      names.push(rv ? rv.name : ref && ref.id);
+    }
+    result.other[key] = names;
+  }
+  return result;
+}
+
+async function deleteStyle(params) {
+  var { styleId, name, type } = params || {};
+  var style = null;
+  if (styleId) style = await figma.getStyleByIdAsync(styleId);
+  if (!style && name) {
+    var lists = {
+      TEXT: () => figma.getLocalTextStylesAsync(),
+      PAINT: () => figma.getLocalPaintStylesAsync(),
+      EFFECT: () => figma.getLocalEffectStylesAsync(),
+      GRID: () => figma.getLocalGridStylesAsync(),
+    };
+    var kinds = type ? [type] : Object.keys(lists);
+    var matches = [];
+    for (var kind of kinds) {
+      if (!lists[kind]) throw new Error(`Unknown style type: ${kind}`);
+      var styles = await lists[kind]();
+      matches = matches.concat(styles.filter((s) => s.name === name));
+    }
+    if (matches.length > 1) {
+      throw new Error(`${matches.length} styles named "${name}"; pass type or styleId`);
+    }
+    style = matches[0] || null;
+  }
+  if (!style) throw new Error(`Style not found: ${styleId || name}`);
+  var info = { id: style.id, name: style.name, type: style.type };
+  style.remove();
+  return Object.assign(info, { deleted: true });
 }
