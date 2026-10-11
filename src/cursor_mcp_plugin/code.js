@@ -55,7 +55,7 @@ async function sendProgressUpdate(
 }
 
 // Fork build version: bump on every change to this plugin (shown in the UI header)
-const PLUGIN_VERSION = "0.3.5-prem.3";
+const PLUGIN_VERSION = "0.3.5-prem.4";
 
 // Show UI
 figma.showUI(__html__, { width: 350, height: 600 });
@@ -287,6 +287,8 @@ async function handleCommand(command, params) {
       return await getBoundVariables(params);
     case "delete_style":
       return await deleteStyle(params);
+    case "execute_code":
+      return await executeCode(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -4626,4 +4628,39 @@ async function deleteStyle(params) {
   var info = { id: style.id, name: style.name, type: style.type };
   style.remove();
   return Object.assign(info, { deleted: true });
+}
+
+// Runs code as the body of an async function with `figma` in scope. `return`
+// sends a value back; nodes in it become { id, name, type }. `log(...)` lines
+// are returned too.
+async function executeCode(params) {
+  var code = params && params.code;
+  if (!code) throw new Error("Missing code");
+  var logs = [];
+  var log = (...args) =>
+    logs.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(toPlain(a)))).join(" "));
+  var AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  var run = new AsyncFunction("figma", "log", code);
+  var value = await run(figma, log);
+  return { result: toPlain(value), logs };
+}
+
+// Makes a value safe to post back: nodes and styles shrink to their ids, and
+// deep or cyclic structures are cut off
+function toPlain(value, depth = 0, seen = new Set()) {
+  if (value === undefined) return null;
+  if (value === figma.mixed) return "mixed";
+  if (typeof value === "symbol") return value.toString();
+  if (typeof value === "function") return "[function]";
+  if (value === null || typeof value !== "object") return value;
+  if (typeof value.id === "string" && typeof value.type === "string" && "name" in value) {
+    return { id: value.id, name: value.name, type: value.type };
+  }
+  if (seen.has(value) || depth > 8) return "[…]";
+  seen.add(value);
+  if (value instanceof Uint8Array) return `[${value.length} bytes]`;
+  if (Array.isArray(value)) return value.map((v) => toPlain(v, depth + 1, seen));
+  var out = {};
+  for (var key of Object.keys(value)) out[key] = toPlain(value[key], depth + 1, seen);
+  return out;
 }

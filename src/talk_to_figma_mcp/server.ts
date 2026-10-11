@@ -2666,7 +2666,8 @@ type FigmaCommand =
   | "delete_variable"
   | "bind_variable"
   | "get_bound_variables"
-  | "delete_style";
+  | "delete_style"
+  | "execute_code";
 
 type CommandParams = {
   get_document_info: Record<string, never>;
@@ -3378,6 +3379,20 @@ pluginTool("delete_style", "Delete a local style by id, or by name (pass type wh
   name: z.string().optional().describe("Style name, e.g. Web/H1"),
   type: z.enum(["TEXT", "PAINT", "EFFECT", "GRID"]).optional(),
 });
+
+pluginTool(
+  "execute_code",
+  "Run Figma Plugin API JavaScript in the open file, for anything the other tools can't do: ellipses, " +
+    "polygons, stars, lines, vectors, components and variants (figma.createComponent, figma.combineAsVariants), " +
+    "effects (node.effects), font styling (fontName, fontSize, lineHeight, letterSpacing, setRange* methods), " +
+    "boolean operations (figma.union/subtract/intersect/exclude). The code is the body of an async function with " +
+    "`figma` and `log(...)` in scope; `return` a value to get it back (nodes come back as {id, name, type}). " +
+    "Use await figma.getNodeByIdAsync(id), not getNodeById. Call await figma.loadFontAsync(fontName) before " +
+    "changing text or its font. Changes apply immediately.",
+  {
+    code: z.string().describe("Body of an async function, e.g. const e = figma.createEllipse(); e.resize(80, 80); return e;"),
+  }
+);
 
 // Update the join_channel tool
 server.tool(
