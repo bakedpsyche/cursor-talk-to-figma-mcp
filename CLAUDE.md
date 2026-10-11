@@ -47,12 +47,14 @@ Runs inside Figma. `code.js` is the plugin main thread handling 30+ commands via
 
 This checkout is the fork `bakedpsyche/cursor-talk-to-figma-mcp`. `origin` is the fork (push here); `upstream` is `grab/cursor-talk-to-figma-mcp`, fetch only (its push URL is disabled on purpose). Pull upstream updates with `git fetch upstream && git merge upstream/main`, then push to `origin`. Never push to upstream.
 
-Plugin commands added in `code.js` (Plugin API, no plan limits): `get_plugin_version`, `get_variables`, `create_variable`, `set_variable_value`, `set_variable_scopes`, `delete_variable`, `bind_variable`, `get_bound_variables`, `delete_style`. Variables are found by id or by name (pass `collection` when a name exists in several); colour values are hex, and `{"alias": "<variable>"}` makes an alias. Each is also an MCP tool (registered through `pluginTool()` in `server.ts`, returning the plugin's JSON). Without the MCP server, send them with the relay client:
+Plugin commands added in `code.js` (Plugin API, no plan limits): `get_plugin_version`, `get_variables`, `create_variable`, `set_variable_value`, `set_variable_scopes`, `delete_variable`, `bind_variable`, `get_bound_variables`, `delete_style`, `execute_code`. Variables are found by id or by name (pass `collection` when a name exists in several); colour values are hex, and `{"alias": "<variable>"}` makes an alias. Each is also an MCP tool (registered through `pluginTool()` in `server.ts`, returning the plugin's JSON). Without the MCP server, send them with the relay client:
 
 ```bash
 bun scripts/figma.ts get_variables '{"collection":"Website (DesignPrem)"}'
 bun scripts/figma.ts bind_variable '{"nodeId":"1:2","variable":"text/on-dark-display","field":"fills"}'
 ```
+
+`execute_code` runs Plugin API JavaScript as the body of an async function with `figma` and `log(...)` in scope, and returns `{ result, logs }` (nodes in the result become `{id, name, type}`). It covers what the fixed tools don't: ellipses, polygons, stars, lines and vectors, components and variants, effects, font styling, boolean operations. Whichever file has the plugin open runs the code, so the one-file rule below matters more here.
 
 **Fixed channel:** the fork's plugin always joins channel `prem` (`FIXED_CHANNEL` in `ui.html`), and the script uses it by default (`FIGMA_CHANNEL` overrides). The relay listens on 127.0.0.1 only, so the name can't collide with other people; but every Figma file with the plugin open joins the same channel and receives each command, so keep the plugin open in one file at a time. The MCP server joins `prem` by itself on connect (`DEFAULT_CHANNEL` in `server.ts`), so `join_channel` isn't needed.
 
