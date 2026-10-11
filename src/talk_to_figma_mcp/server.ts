@@ -2657,7 +2657,16 @@ type FigmaCommand =
   | "set_image_fill"
   | "rename_node"
   | "create_section"
-  | "set_parent";
+  | "set_parent"
+  | "get_plugin_version"
+  | "get_variables"
+  | "create_variable"
+  | "set_variable_value"
+  | "set_variable_scopes"
+  | "delete_variable"
+  | "bind_variable"
+  | "get_bound_variables"
+  | "delete_style";
 
 type CommandParams = {
   get_document_info: Record<string, never>;
@@ -2861,6 +2870,9 @@ function processFigmaNodeResponse(result: unknown): any {
 }
 
 // Update the connectToFigma function
+// Fork: matches FIXED_CHANNEL in the plugin's ui.html
+const DEFAULT_CHANNEL = process.env.FIGMA_CHANNEL ?? "prem";
+
 function connectToFigma(port: number = 3055) {
   // If already connected, do nothing
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2876,6 +2888,10 @@ function connectToFigma(port: number = 3055) {
     logger.info('Connected to Figma socket server');
     // Reset channel on new connection
     currentChannel = null;
+    // Fork: the plugin always joins a fixed channel, so join it straight away
+    joinChannel(DEFAULT_CHANNEL).catch((error) =>
+      logger.error(`Auto-join of channel "${DEFAULT_CHANNEL}" failed: ${error instanceof Error ? error.message : String(error)}`)
+    );
   });
 
   ws.on("message", (data: any) => {
@@ -3285,6 +3301,83 @@ server.tool(
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Fork: variables, bindings and style deletion (plugin commands in code.js)
+// ---------------------------------------------------------------------------
+
+// Registers a tool that forwards its params to the plugin and returns the JSON result
+function pluginTool(command: FigmaCommand, description: string, schema: Record<string, z.ZodTypeAny>) {
+  server.tool(command, description, schema, async (params: any) => {
+    try {
+      const result = await sendCommandToFigma(command, params);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Error in ${command}: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+      };
+    }
+  });
+}
+
+const variableRef = {
+  variable: z.string().describe("Variable id (VariableID:...) or name, e.g. text/on-light"),
+  collection: z.string().optional().describe("Collection name or id; needed when the name exists in several"),
+};
+const variableValue = z
+  .union([z.string(), z.number(), z.boolean(), z.object({ alias: z.string(), collection: z.string().optional() })])
+  .describe('Hex colour for COLOR, number for FLOAT, or {"alias": "<variable>"} to alias another variable');
+
+pluginTool("get_plugin_version", "Get the build version of the Figma plugin that is running", {});
+
+pluginTool(
+  "get_variables",
+  "List local variable collections with every variable's value per mode (hex or alias), type and scopes",
+  { collection: z.string().optional().describe("Only this collection (name or id)") }
+);
+
+pluginTool("create_variable", "Create a variable in a local collection, set for every mode", {
+  collection: z.string().describe("Collection name or id"),
+  name: z.string().describe("Variable name, slash-separated for groups, e.g. text/on-dark-display"),
+  type: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]).optional().describe("Defaults to COLOR"),
+  value: variableValue.optional(),
+  scopes: z.array(z.string()).optional().describe("Variable scopes, e.g. [\"TEXT_FILL\"]; [] hides it from pickers"),
+});
+
+pluginTool("set_variable_value", "Set a variable's value for one mode or for all modes", {
+  ...variableRef,
+  value: variableValue,
+  mode: z.string().optional().describe("Mode name or id; all modes when omitted"),
+});
+
+pluginTool("set_variable_scopes", "Set where a variable can be applied (its scopes)", {
+  ...variableRef,
+  scopes: z.array(z.string()).describe("e.g. [\"TEXT_FILL\"], [\"FRAME_FILL\",\"SHAPE_FILL\"], [\"STROKE_COLOR\"], [] to hide"),
+});
+
+pluginTool("delete_variable", "Delete a local variable", variableRef);
+
+pluginTool("bind_variable", "Bind a colour variable to a node's solid fill or stroke", {
+  nodeId: z.string().describe("The node to bind"),
+  ...variableRef,
+  field: z.enum(["fills", "strokes"]).optional().describe("Defaults to fills"),
+  index: z.number().optional().describe("Paint index, defaults to 0"),
+});
+
+pluginTool("get_bound_variables", "Show which variables a node's fills, strokes and other properties are bound to", {
+  nodeId: z.string().describe("The node to inspect"),
+});
+
+pluginTool("delete_style", "Delete a local style by id, or by name (pass type when names repeat)", {
+  styleId: z.string().optional().describe("Style id (S:...)"),
+  name: z.string().optional().describe("Style name, e.g. Web/H1"),
+  type: z.enum(["TEXT", "PAINT", "EFFECT", "GRID"]).optional(),
+});
 
 // Update the join_channel tool
 server.tool(
