@@ -529,8 +529,9 @@
           state.socket = new WebSocket(wsUrl);
 
           state.socket.onopen = () => {
-            // Generate random channel name
-            const channelName = generateChannelName();
+            // Fixed channel (fork): the relay is localhost-only, so a fixed
+            // name can't collide with anyone else. Every open plugin joins it.
+            const channelName = FIXED_CHANNEL;
             console.log("Joining channel:", channelName);
             state.channel = channelName;
 
@@ -763,6 +764,8 @@
       }
 
       // Add this function after the generateId() function
+      const FIXED_CHANNEL = "prem";
+
       function generateChannelName() {
         const characters = "abcdefghijklmnopqrstuvwxyz0123456789";
         let result = "";

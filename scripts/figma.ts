@@ -1,17 +1,19 @@
 #!/usr/bin/env bun
 // Send one command to the Figma plugin through the local relay, without the MCP server.
 //
-//   bun scripts/figma.ts <channel> <command> ['<json params>']
-//   bun scripts/figma.ts 7x2c62jh get_variables '{"collection":"Website (DesignPrem)"}'
+//   bun scripts/figma.ts <command> ['<json params>']
+//   bun scripts/figma.ts get_variables '{"collection":"Website (DesignPrem)"}'
 //
-// Needs the relay running (`bun socket`) and the plugin open in Figma on <channel>.
+// Needs the relay running (`bun socket`) and the plugin open in Figma. The fork's
+// plugin always joins channel "prem"; set FIGMA_CHANNEL to use another one.
 // Prints the plugin's result as JSON; exits 1 on an error or timeout.
 
-const [channel, command, rawParams = "{}"] = process.argv.slice(2);
-if (!channel || !command) {
-  console.error("usage: bun scripts/figma.ts <channel> <command> ['<json params>']");
+const [command, rawParams = "{}"] = process.argv.slice(2);
+if (!command) {
+  console.error("usage: bun scripts/figma.ts <command> ['<json params>']");
   process.exit(2);
 }
+const channel = process.env.FIGMA_CHANNEL ?? "prem";
 
 const params = JSON.parse(rawParams);
 const port = process.env.FIGMA_RELAY_PORT ?? "3055";

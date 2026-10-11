@@ -50,9 +50,11 @@ This checkout is the fork `bakedpsyche/cursor-talk-to-figma-mcp`. `origin` is th
 Plugin commands added in `code.js` (Plugin API, no plan limits): `get_variables`, `create_variable`, `set_variable_value`, `set_variable_scopes`, `delete_variable`, `bind_variable`, `get_bound_variables`, `delete_style`. Variables are found by id or by name (pass `collection` when a name exists in several); colour values are hex, and `{"alias": "<variable>"}` makes an alias. They are not MCP tools yet: send them with the relay client, which needs no MCP server:
 
 ```bash
-bun scripts/figma.ts <channel> get_variables '{"collection":"Website (DesignPrem)"}'
-bun scripts/figma.ts <channel> bind_variable '{"nodeId":"1:2","variable":"text/on-dark-display","field":"fills"}'
+bun scripts/figma.ts get_variables '{"collection":"Website (DesignPrem)"}'
+bun scripts/figma.ts bind_variable '{"nodeId":"1:2","variable":"text/on-dark-display","field":"fills"}'
 ```
+
+**Fixed channel:** the fork's plugin always joins channel `prem` (`FIXED_CHANNEL` in `ui.html`), and the script uses it by default (`FIGMA_CHANNEL` overrides). The relay listens on 127.0.0.1 only, so the name can't collide with other people; but every Figma file with the plugin open joins the same channel and receives each command, so keep the plugin open in one file at a time. For the MCP tools, `join_channel` with `prem`.
 
 **Build version:** `PLUGIN_VERSION` at the top of `code.js` (format `<upstream version>-prem.<n>`) is shown in the plugin panel header and returned by `get_plugin_version`. Bump it on every plugin change, so the running build can be told apart. A panel without a "Build:" line is an upstream or Community build.
 
