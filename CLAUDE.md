@@ -43,6 +43,19 @@ Runs inside Figma. `code.js` is the plugin main thread handling 30+ commands via
 - **Reconnection**: WebSocket auto-reconnects after 2 seconds on disconnect.
 - **Zod validation**: All tool parameters are validated with Zod schemas.
 
+## Fork: Local Additions
+
+This checkout is the fork `bakedpsyche/cursor-talk-to-figma-mcp`. `origin` is the fork (push here); `upstream` is `grab/cursor-talk-to-figma-mcp`, fetch only (its push URL is disabled on purpose). Pull upstream updates with `git fetch upstream && git merge upstream/main`, then push to `origin`. Never push to upstream.
+
+Plugin commands added in `code.js` (Plugin API, no plan limits): `get_variables`, `create_variable`, `set_variable_value`, `set_variable_scopes`, `delete_variable`, `bind_variable`, `get_bound_variables`, `delete_style`. Variables are found by id or by name (pass `collection` when a name exists in several); colour values are hex, and `{"alias": "<variable>"}` makes an alias. They are not MCP tools yet: send them with the relay client, which needs no MCP server:
+
+```bash
+bun scripts/figma.ts <channel> get_variables '{"collection":"Website (DesignPrem)"}'
+bun scripts/figma.ts <channel> bind_variable '{"nodeId":"1:2","variable":"text/on-dark-display","field":"fills"}'
+```
+
+The plugin running in Figma must be the dev plugin linked from this checkout's `src/cursor_mcp_plugin/manifest.json`; the Community build answers "Unknown command".
+
 ## Setup
 
 1. Run `bun setup` — installs dependencies and writes MCP config for both Cursor (`.cursor/mcp.json`) and Claude Code (`.mcp.json`)
