@@ -54,8 +54,12 @@ async function sendProgressUpdate(
   return update;
 }
 
+// Fork build version: bump on every change to this plugin (shown in the UI header)
+const PLUGIN_VERSION = "0.3.5-prem.2";
+
 // Show UI
 figma.showUI(__html__, { width: 350, height: 600 });
+figma.ui.postMessage({ type: "plugin-version", version: PLUGIN_VERSION });
 
 // Initialize anonymous analytics client_id (persisted via clientStorage)
 (async () => {
@@ -86,6 +90,9 @@ figma.ui.onmessage = async (msg) => {
       break;
     case "close-plugin":
       figma.closePlugin();
+      break;
+    case "get-version":
+      figma.ui.postMessage({ type: "plugin-version", version: PLUGIN_VERSION });
       break;
     case "execute-command":
       // Execute commands received from UI (which gets them from WebSocket)
@@ -262,6 +269,8 @@ async function handleCommand(command, params) {
       return await createSection(params);
     case "set_parent":
       return await setParent(params);
+    case "get_plugin_version":
+      return { version: PLUGIN_VERSION };
     case "get_variables":
       return await getVariables(params);
     case "create_variable":

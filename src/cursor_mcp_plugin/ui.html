@@ -259,6 +259,7 @@
         <div class="header-text">
           <h1>Talk To Figma MCP Plugin</h1>
           <p>Connect Figma to Cursor AI using MCP</p>
+          <p id="plugin-version">Build: unknown (old build, no version)</p>
         </div>
       </div>
 
@@ -869,6 +870,9 @@
       }
 
       // Listen for messages from the plugin code
+      // Ask the plugin code for its build version once the UI is listening
+      parent.postMessage({ pluginMessage: { type: "get-version" } }, "*");
+
       window.onmessage = (event) => {
         const message = event.data.pluginMessage;
         if (!message) return;
@@ -878,6 +882,10 @@
         switch (message.type) {
           case "connection-status":
             updateConnectionStatus(message.connected, message.message);
+            break;
+          case "plugin-version":
+            document.getElementById("plugin-version").textContent =
+              "Build: " + message.version;
             break;
           case "auto-connect":
             connectButton.click();

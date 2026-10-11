@@ -54,6 +54,8 @@ bun scripts/figma.ts <channel> get_variables '{"collection":"Website (DesignPrem
 bun scripts/figma.ts <channel> bind_variable '{"nodeId":"1:2","variable":"text/on-dark-display","field":"fills"}'
 ```
 
+**Build version:** `PLUGIN_VERSION` at the top of `code.js` (format `<upstream version>-prem.<n>`) is shown in the plugin panel header and returned by `get_plugin_version`. Bump it on every plugin change, so the running build can be told apart. A panel without a "Build:" line is an upstream or Community build.
+
 The plugin running in Figma must be the dev plugin linked from this checkout's `src/cursor_mcp_plugin/manifest.json`; the Community build answers "Unknown command".
 
 ## Setup
